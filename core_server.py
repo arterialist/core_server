@@ -7,6 +7,8 @@ import threading
 from json import JSONDecodeError
 
 import layers
+from models.actions import ServiceAction
+from models.messages import Message
 from models.packets import Packet
 from models.peers import Client, Peer
 from modules.default_modules import SendAsJSONModule, Base64EncodeModule
@@ -26,6 +28,13 @@ max_connections = args.limit
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 sock.bind(('', port))
+
+
+def broadcast(packet: Packet, ignore_list: list):
+    peer_ids = copy.deepcopy(list(peers.keys()))
+    for peer_id in peer_ids:
+        if peer_id in peers.keys() and peer_id not in ignore_list:  # just in case someone has disconnected during broadcast
+            layers.socket_send_data(peers[peer_id]["socket"], packet, loaded_modules)
 
 
 def message_received(message: Packet, peer: Peer):
@@ -48,6 +57,12 @@ def incoming_message_listener(connection, peer: Peer):
             print("Peer", peer.peer_id, "disconnected.")
             if peer.peer_id in peers.keys():
                 peers.pop(peer.peer_id)
+            broadcast(
+                Packet(
+                    action=ServiceAction(),
+                    message=Message(text="{} disconnected.".format(peer.peer_id))
+                ), []
+            )
             break
 
         try:
@@ -79,8 +94,17 @@ def incoming_connections_listener():
 
                 incoming_message_thread.setDaemon(True)
                 incoming_message_thread.start()
+
+                broadcast(
+                    Packet(
+                        action=ServiceAction(),
+                        message=Message(text="{} connected.".format(peer.peer_id))
+                    ),
+                    [peer.peer_id]
+                )
         except OSError:
             continue
+
 
 sock.listen(max_connections)
 
@@ -89,6 +113,7 @@ incoming_connections_thread.setDaemon(True)
 incoming_connections_thread.start()
 
 
+# noinspection PyUnusedLocal
 def exit_handler(sig, frame):
     print("\nGot exit signal")
     peer_ids = copy.deepcopy(list(peers.keys()))
