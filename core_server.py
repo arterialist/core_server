@@ -95,7 +95,7 @@ def incoming_connections_listener():
                 incoming_message_thread.setDaemon(True)
                 incoming_message_thread.start()
 
-                print("Peer", peer.peer_id, "disconnected.")
+                print("Peer", peer.peer_id, "connected.")
                 broadcast(
                     Packet(
                         action=ServiceAction(),
