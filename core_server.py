@@ -20,10 +20,12 @@ peers = dict()
 parser = argparse.ArgumentParser(description="Server Parameters")
 parser.add_argument('--port', type=int, default=51423, help="Server listening port")
 parser.add_argument('--limit', type=int, default=1024, help="Maximum number of connections")
+parser.add_argument('--debug', help="Enable debug logs", action="store_true")
 
 args = parser.parse_args()
 port = args.port
 max_connections = args.limit
+debug = args.debug
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -48,10 +50,19 @@ def message_received(message: Packet, peer: Peer):
 
 def incoming_message_listener(connection, peer: Peer):
     while peer.peer_id in peers.keys():
+        if peers[peer.peer_id]["muted"]:
+            continue
+
         try:
             data = connection.recv(8192)
-        except OSError:
+        except OSError as error:
+            if debug:
+                print("Error in message thread (peer {})".format(peer.peer_id))
+                print(error)
             continue
+
+        if debug:
+            print("Data:", data)
 
         if data == b'':
             print("Peer", peer.peer_id, "disconnected.")
@@ -69,12 +80,18 @@ def incoming_message_listener(connection, peer: Peer):
             packet = layers.socket_handle_received(connection, data.decode("utf8"), loaded_modules)
             message_received(packet, peer)
             print("Message from", peer.peer_id, ": ", packet.message.text)
-        except UnicodeDecodeError:
+        except UnicodeDecodeError as error:
             print("Corrupted packet from", peer.peer_id)
-        except JSONDecodeError:
+            if debug:
+                print(error)
+        except JSONDecodeError as error:
             print("Invalid packet from", peer.peer_id)
-        except KeyError:
+            if debug:
+                print(error)
+        except KeyError as error:
             print("Invalid packet from", peer.peer_id)
+            if debug:
+                print(error)
 
 
 def incoming_connections_listener():
@@ -82,14 +99,15 @@ def incoming_connections_listener():
         try:
             if len(peers.keys()) != max_connections:
                 connection, address = sock.accept()
-                connection.settimeout(2)
+                connection.settimeout(30)
                 peer = Client(address[0], address[1])
                 incoming_message_thread = threading.Thread(target=incoming_message_listener, args=[connection, peer])
 
                 peers[peer.peer_id] = {
                     "peer": peer,
                     "socket": connection,
-                    "thread": incoming_message_thread
+                    "thread": incoming_message_thread,
+                    "muted": False
                 }
 
                 incoming_message_thread.setDaemon(True)
@@ -105,6 +123,24 @@ def incoming_connections_listener():
                 )
         except OSError:
             continue
+
+
+def kick(peer_id):
+    print("Kicking peer", peer_id)
+    peers[peer_id]["thread"].join(0)
+    peers[peer_id]["socket"].shutdown(socket.SHUT_RDWR)
+    peers[peer_id]["socket"].close()
+    peers.pop(peer_id)
+
+
+def mute(peer_id):
+    print("Muting peer", peer_id)
+    peers[peer_id]["muted"] = True
+
+
+def unmute(peer_id):
+    print("Unmuting peer", peer_id)
+    peers[peer_id]["muted"] = False
 
 
 sock.listen(max_connections)
