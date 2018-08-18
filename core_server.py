@@ -35,14 +35,21 @@ sock.bind(('', port))
 def broadcast(packet: Packet, ignore_list: list):
     peer_ids = copy.deepcopy(list(peers.keys()))
     for peer_id in peer_ids:
-        if peer_id in peers.keys() and peer_id not in ignore_list:  # just in case someone has disconnected during broadcast
+        if peer_id in peers.keys() \
+                and peer_id not in ignore_list \
+                and peers[peer_id]["wrote"]:
             layers.socket_send_data(peers[peer_id]["socket"], packet, loaded_modules)
+
+
+def send_to_single(packet: Packet, peer_id: str):
+    if peer_id in peers.keys():
+        layers.socket_send_data(peers[peer_id]["socket"], packet, loaded_modules)
 
 
 def message_received(message: Packet, peer: Peer):
     peer_ids = copy.deepcopy(list(peers.keys()))
     for peer_id in peer_ids:
-        if peer_id == peer.peer_id:
+        if peer_id == peer.peer_id or not peers[peer_id]["wrote"]:
             continue
         if peer_id in peers.keys():  # just in case someone has disconnected during broadcast
             layers.socket_send_data(peers[peer_id]["socket"], message, loaded_modules)
@@ -95,8 +102,20 @@ def incoming_message_listener(connection, peer: Peer):
             packet = layers.socket_handle_received(connection, data.decode("utf8"), loaded_modules)
             if packet.action.action == DisconnectAction().action:
                 disconnected_callback(peer.peer_id)
-            if packet.action.action == ConnectAction().action:
+            elif packet.action.action == ConnectAction().action:
                 connected_callback(peer.peer_id)
+            else:
+                if not peers[peer.peer_id]["wrote"]:
+                    send_to_single(
+                        Packet(
+                            action=ServiceAction(),
+                            message=Message(text="Wrong button, buddy :)")
+                        ),
+                        peer.peer_id
+                    )
+                    kick(peer.peer_id)
+                    break
+            peers[peer.peer_id]["wrote"] = True
             message_received(packet, peer)
             print("Message from", peer.peer_id, ": ", packet.message.text)
         except UnicodeDecodeError as error:
@@ -122,7 +141,8 @@ def incoming_connections_listener():
                     "peer": peer,
                     "socket": connection,
                     "thread": incoming_message_thread,
-                    "muted": False
+                    "muted": False,
+                    "wrote": False
                 }
 
                 incoming_message_thread.setDaemon(True)
@@ -133,7 +153,6 @@ def incoming_connections_listener():
 
 def kick(peer_id):
     print("Kicking peer", peer_id)
-    peers[peer_id]["thread"].join(0)
     peers[peer_id]["socket"].shutdown(socket.SHUT_RDWR)
     peers[peer_id]["socket"].close()
     peers.pop(peer_id)
