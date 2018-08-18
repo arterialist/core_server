@@ -102,8 +102,12 @@ def incoming_message_listener(connection, peer: Peer):
             packet = layers.socket_handle_received(connection, data.decode("utf8"), loaded_modules)
             if packet.action.action == DisconnectAction().action:
                 disconnected_callback(peer.peer_id)
+                peers[peer.peer_id]["wrote"] = True
+                continue
             elif packet.action.action == ConnectAction().action:
                 connected_callback(peer.peer_id)
+                peers[peer.peer_id]["wrote"] = True
+                continue
             else:
                 if not peers[peer.peer_id]["wrote"]:
                     send_to_single(
