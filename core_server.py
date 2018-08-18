@@ -7,7 +7,7 @@ import threading
 from json import JSONDecodeError
 
 import layers
-from models.actions import ServiceAction
+from models.actions import ServiceAction, DisconnectAction, ConnectAction
 from models.messages import Message
 from models.packets import Packet
 from models.peers import Client, Peer
@@ -48,6 +48,27 @@ def message_received(message: Packet, peer: Peer):
             layers.socket_send_data(peers[peer_id]["socket"], message, loaded_modules)
 
 
+def disconnected_callback(peer_id):
+    print("Peer", peer_id, "disconnected.")
+    broadcast(
+        Packet(
+            action=ServiceAction(),
+            message=Message(text="{} disconnected.".format(peer_id))
+        ), [peer_id]
+    )
+
+
+def connected_callback(peer_id):
+    print("Peer", peer_id, "connected.")
+    broadcast(
+        Packet(
+            action=ServiceAction(),
+            message=Message(text="{} connected.".format(peer_id))
+        ),
+        [peer_id]
+    )
+
+
 def incoming_message_listener(connection, peer: Peer):
     while peer.peer_id in peers.keys():
         if peers[peer.peer_id]["muted"]:
@@ -65,30 +86,24 @@ def incoming_message_listener(connection, peer: Peer):
             print("Data:", data)
 
         if data == b'':
-            print("Peer", peer.peer_id, "disconnected.")
             if peer.peer_id in peers.keys():
                 peers.pop(peer.peer_id)
-            broadcast(
-                Packet(
-                    action=ServiceAction(),
-                    message=Message(text="{} disconnected.".format(peer.peer_id))
-                ), []
-            )
+            disconnected_callback(peer.peer_id)
             break
 
         try:
             packet = layers.socket_handle_received(connection, data.decode("utf8"), loaded_modules)
+            if packet.action.action == DisconnectAction().action:
+                disconnected_callback(peer.peer_id)
+            if packet.action.action == ConnectAction().action:
+                connected_callback(peer.peer_id)
             message_received(packet, peer)
             print("Message from", peer.peer_id, ": ", packet.message.text)
         except UnicodeDecodeError as error:
             print("Corrupted packet from", peer.peer_id)
             if debug:
                 print(error)
-        except JSONDecodeError as error:
-            print("Invalid packet from", peer.peer_id)
-            if debug:
-                print(error)
-        except KeyError as error:
+        except (JSONDecodeError, KeyError, TypeError) as error:
             print("Invalid packet from", peer.peer_id)
             if debug:
                 print(error)
@@ -112,15 +127,6 @@ def incoming_connections_listener():
 
                 incoming_message_thread.setDaemon(True)
                 incoming_message_thread.start()
-
-                print("Peer", peer.peer_id, "connected.")
-                broadcast(
-                    Packet(
-                        action=ServiceAction(),
-                        message=Message(text="{} connected.".format(peer.peer_id))
-                    ),
-                    [peer.peer_id]
-                )
         except OSError:
             continue
 
@@ -153,6 +159,12 @@ incoming_connections_thread.start()
 # noinspection PyUnusedLocal
 def exit_handler(sig, frame):
     print("\nGot exit signal")
+    broadcast(
+        Packet(
+            action=ServiceAction(),
+            message=Message(text="Server shutdown.")
+        ), []
+    )
     peer_ids = copy.deepcopy(list(peers.keys()))
 
     for peer_id in peer_ids:
