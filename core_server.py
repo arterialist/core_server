@@ -93,14 +93,16 @@ def incoming_message_listener(connection, peer: Peer):
             print("Data:", data)
 
         if data == b'':
+            if not peers[peer.peer_id]["soft_disconnected"]:
+                disconnected_callback(peer.peer_id)
             if peer.peer_id in peers.keys():
                 peers.pop(peer.peer_id)
-            disconnected_callback(peer.peer_id)
             break
 
         try:
             packet = layers.socket_handle_received(connection, data.decode("utf8"), loaded_modules)
             if packet.action.action == DisconnectAction().action:
+                peers[peer.peer_id]["soft_disconnected"] = True
                 disconnected_callback(peer.peer_id)
                 peers[peer.peer_id]["wrote"] = True
                 continue
@@ -146,7 +148,8 @@ def incoming_connections_listener():
                     "socket": connection,
                     "thread": incoming_message_thread,
                     "muted": False,
-                    "wrote": False
+                    "wrote": False,
+                    "soft_disconnected": False
                 }
 
                 incoming_message_thread.setDaemon(True)
