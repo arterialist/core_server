@@ -11,9 +11,13 @@ from models.actions import ServiceAction, DisconnectAction, ConnectAction
 from models.messages import Message
 from models.packets import Packet
 from models.peers import Client, Peer
-from modules.default_modules import SendAsJSONModule, Base64EncodeModule
+from modules.default_modules import SendAsJSONModule, Base64EncodeModule, Base64SendModule, AES256SendModule
 
-loaded_modules = [SendAsJSONModule(), Base64EncodeModule()]
+loaded_modules = {
+    "transformer": SendAsJSONModule(),
+    "model": [Base64EncodeModule()],
+    "binary": [Base64SendModule(), AES256SendModule("yoursecretkey123", enabled=False)]
+}
 
 peers = dict()
 
@@ -38,12 +42,14 @@ def broadcast(packet: Packet, ignore_list: list):
         if peer_id in peers.keys() \
                 and peer_id not in ignore_list \
                 and peers[peer_id]["wrote"]:
-            layers.socket_send_data(peers[peer_id]["socket"], packet, loaded_modules)
+            layers.socket_send_data(peers[peer_id]["socket"], packet, loaded_modules,
+                                    lambda m, e: print(f"Error in module {m.__class__.__name__} on receive:\n{e}"))
 
 
 def send_to_single(packet: Packet, peer_id: str):
     if peer_id in peers.keys():
-        layers.socket_send_data(peers[peer_id]["socket"], packet, loaded_modules)
+        layers.socket_send_data(peers[peer_id]["socket"], packet, loaded_modules,
+                                lambda m, e: print(f"Error in module {m.__class__.__name__} on receive:\n{e}"))
 
 
 def message_received(message: Packet, peer: Peer):
@@ -52,7 +58,8 @@ def message_received(message: Packet, peer: Peer):
         if peer_id == peer.peer_id or not peers[peer_id]["wrote"]:
             continue
         if peer_id in peers.keys():  # just in case someone has disconnected during broadcast
-            layers.socket_send_data(peers[peer_id]["socket"], message, loaded_modules)
+            layers.socket_send_data(peers[peer_id]["socket"], message, loaded_modules,
+                                    lambda m, e: print(f"Error in module {m.__class__.__name__} on receive:\n{e}"))
 
 
 def disconnected_callback(peer_id):
@@ -100,7 +107,8 @@ def incoming_message_listener(connection, peer: Peer):
             break
 
         try:
-            packet = layers.socket_handle_received(connection, data.decode("utf8"), loaded_modules)
+            packet = layers.socket_handle_received(connection, data.decode("utf8"), loaded_modules,
+                                                   lambda m, e: print(f"Error in module {m.__class__.__name__} on receive:\n{e}"))
             if packet.action.action == DisconnectAction().action:
                 peers[peer.peer_id]["soft_disconnected"] = True
                 disconnected_callback(peer.peer_id)
