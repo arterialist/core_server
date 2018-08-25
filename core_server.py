@@ -12,6 +12,7 @@ from models.messages import Message
 from models.packets import Packet
 from models.peers import Client, Peer
 from modules.default_modules import SendAsJSONModule, Base64EncodeModule, Base64SendModule, AES256SendModule
+from modules.module import STATUS_OK
 
 loaded_modules = {
     "transformer": SendAsJSONModule(),
@@ -84,12 +85,13 @@ def connected_callback(peer_id):
 
 
 def incoming_message_listener(connection, peer: Peer):
+    next_data_len = 8
     while peer.peer_id in peers.keys():
         if peers[peer.peer_id]["muted"]:
             continue
 
         try:
-            data = connection.recv(8192)
+            data = connection.recv(next_data_len)
         except OSError as error:
             if debug:
                 print("Error in message thread (peer {})".format(peer.peer_id))
@@ -106,9 +108,24 @@ def incoming_message_listener(connection, peer: Peer):
                 peers.pop(peer.peer_id)
             break
 
+        decoded_data: str = data.decode("utf8")
+        if len(data) == 8 and len(decoded_data) == 8 and decoded_data.startswith(chr(64)) and decoded_data.endswith(chr(64)):
+            def is_number(string: str):
+                for char in string:
+                    if ord(char) not in range(48, 58):
+                        return False
+                return True
+
+            if is_number(decoded_data[1:7]):
+                next_data_len = int(decoded_data[1:7])
+                continue
+        next_data_len = 8
+
         try:
-            packet = layers.socket_handle_received(connection, data.decode("utf8"), loaded_modules,
-                                                   lambda m, e: print(f"Error in module {m.__class__.__name__} on receive:\n{e}"))
+            packet, status_code = layers.socket_handle_received(connection, data, loaded_modules,
+                                                                lambda m, e: print(f"Error in module {m.__class__.__name__} on receive:\n{e}"))
+            if not (packet and status_code == STATUS_OK):
+                continue
             if packet.action.action == DisconnectAction().action:
                 peers[peer.peer_id]["soft_disconnected"] = True
                 disconnected_callback(peer.peer_id)
