@@ -8,7 +8,7 @@ from json import JSONDecodeError
 
 import layers
 from models.actions import ServiceAction, DisconnectAction, ConnectAction
-from models.messages import Message
+from models.messages import Message, Data
 from models.packets import Packet
 from models.peers import Client, Peer
 from modules.default_modules import SendAsJSONModule, Base64EncodeModule, Base64SendModule, AES256SendModule
@@ -25,12 +25,18 @@ peers = dict()
 parser = argparse.ArgumentParser(description="Server Parameters")
 parser.add_argument('--port', type=int, default=51423, help="Server listening port")
 parser.add_argument('--limit', type=int, default=1024, help="Maximum number of connections")
+parser.add_argument('--relay', help="Run this server as relay for clients under NAT", action="store_true")
 parser.add_argument('--debug', help="Enable debug logs", action="store_true")
 
 args = parser.parse_args()
 port = args.port
 max_connections = args.limit
 debug = args.debug
+is_relay = args.relay
+
+if is_relay and max_connections != 2:
+    print("Relay mode requires exactly 2 connections limit.")
+    exit(0)
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -65,23 +71,40 @@ def message_received(message: Packet, peer: Peer):
 
 def disconnected_callback(peer_id):
     print("Peer", peer_id, "disconnected.")
-    broadcast(
-        Packet(
-            action=ServiceAction(),
-            message=Message(text="{} disconnected.".format(peer_id))
-        ), [peer_id]
-    )
+    if is_relay:
+        send_to_single(
+            Packet(
+                action=DisconnectAction()
+            ),
+            list(peers.items()).remove(peer_id)[0]
+        )
+    else:
+        broadcast(
+            Packet(
+                action=ServiceAction(),
+                message=Message(text="{} disconnected.".format(peer_id))
+            ), [peer_id]
+        )
 
 
 def connected_callback(peer_id):
     print("Peer", peer_id, "connected.")
-    broadcast(
-        Packet(
-            action=ServiceAction(),
-            message=Message(text="{} connected.".format(peer_id))
-        ),
-        [peer_id]
-    )
+    if is_relay:
+        send_to_single(
+            Packet(
+                action=ConnectAction(),
+                data=Data()
+            ),
+            list(peers.items()).remove(peer_id)[0]
+        )
+    else:
+        broadcast(
+            Packet(
+                action=ServiceAction(),
+                message=Message(text="{} connected.".format(peer_id))
+            ),
+            [peer_id]
+        )
 
 
 def incoming_message_listener(connection, peer: Peer):
