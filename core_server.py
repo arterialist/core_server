@@ -60,27 +60,28 @@ def send_to_single(packet: Packet, peer_id: str):
 
 
 def message_received(message: Packet, peer: Peer):
-    peer_ids = copy.deepcopy(list(peers.keys()))
-    for peer_id in peer_ids:
-        if peer_id == peer.peer_id or not peers[peer_id]["wrote"]:
-            continue
-        if peer_id in peers.keys():  # just in case someone has disconnected during broadcast
-            layers.socket_send_data(peers[peer_id]["socket"], message, loaded_modules,
-                                    lambda m, e: print(f"Error in module {m.__class__.__name__} on receive:\n{e}"))
+    if is_relay:
+        if len(list(peers.keys())) > 1:
+            dest_peer_id = list(peers.keys())[0] if list(peers.keys())[0] is not peer.peer_id else list(peers.keys())[1]
+            if not peers.get(dest_peer_id)["soft_disconnected"]:
+                send_to_single(message, dest_peer_id)
+    else:
+        broadcast(message, [peer.peer_id])
 
 
 def disconnected_callback(peer_id):
     print("Peer", peer_id, "disconnected.")
     if is_relay:
-        dest_peer_id = None
         if len(list(peers.keys())) > 1:
-            dest_peer_id = list(peers.keys()) if list(peers.keys())[0] is not peer_id else list(peers.keys())[1]
-        send_to_single(
-            Packet(
-                action=DisconnectAction()
-            ),
-            dest_peer_id
-        )
+            dest_peer_id = list(peers.keys())[0] if list(peers.keys())[0] is not peer_id else list(peers.keys())[1]
+            if not peers.get(dest_peer_id)["soft_disconnected"]:
+                send_to_single(
+                    Packet(
+                        action=DisconnectAction(),
+                        message=Message()
+                    ),
+                    dest_peer_id
+                )
     else:
         broadcast(
             Packet(
@@ -93,16 +94,17 @@ def disconnected_callback(peer_id):
 def connected_callback(peer_id):
     print("Peer", peer_id, "connected.")
     if is_relay:
-        dest_peer_id = None
         if len(list(peers.keys())) > 1:
-            dest_peer_id = list(peers.keys()) if list(peers.keys())[0] is not peer_id else list(peers.keys())[1]
-        send_to_single(
-            Packet(
-                action=ConnectAction(),
-                data=Data()
-            ),
-            dest_peer_id
-        )
+            dest_peer_id = list(peers.keys())[0] if list(peers.keys())[0] is not peer_id else list(peers.keys())[1]
+            if not peers.get(dest_peer_id)["soft_disconnected"]:
+                send_to_single(
+                    Packet(
+                        action=ConnectAction(),
+                        message=Message(),
+                        data=Data()
+                    ),
+                    dest_peer_id
+                )
     else:
         broadcast(
             Packet(
