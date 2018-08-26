@@ -54,7 +54,7 @@ def broadcast(packet: Packet, ignore_list: list):
 
 
 def send_to_single(packet: Packet, peer_id: str):
-    if peer_id in peers.keys():
+    if peer_id in list(peers.keys()):
         layers.socket_send_data(peers[peer_id]["socket"], packet, loaded_modules,
                                 lambda m, e: print(f"Error in module {m.__class__.__name__} on receive:\n{e}"))
 
@@ -72,11 +72,14 @@ def message_received(message: Packet, peer: Peer):
 def disconnected_callback(peer_id):
     print("Peer", peer_id, "disconnected.")
     if is_relay:
+        dest_peer_id = None
+        if len(list(peers.keys())) > 1:
+            dest_peer_id = list(peers.keys()) if list(peers.keys())[0] is not peer_id else list(peers.keys())[1]
         send_to_single(
             Packet(
                 action=DisconnectAction()
             ),
-            list(peers.items()).remove(peer_id)[0]
+            dest_peer_id
         )
     else:
         broadcast(
@@ -90,12 +93,15 @@ def disconnected_callback(peer_id):
 def connected_callback(peer_id):
     print("Peer", peer_id, "connected.")
     if is_relay:
+        dest_peer_id = None
+        if len(list(peers.keys())) > 1:
+            dest_peer_id = list(peers.keys()) if list(peers.keys())[0] is not peer_id else list(peers.keys())[1]
         send_to_single(
             Packet(
                 action=ConnectAction(),
                 data=Data()
             ),
-            list(peers.items()).remove(peer_id)[0]
+            dest_peer_id
         )
     else:
         broadcast(
