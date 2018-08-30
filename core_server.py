@@ -7,7 +7,7 @@ import threading
 from json import JSONDecodeError
 
 import layers
-from models.actions import ServiceAction, DisconnectAction, ConnectAction
+from models.actions import ServiceAction, DisconnectAction, ConnectAction, PeerInfoAction
 from models.messages import Message, Data
 from models.packets import Packet
 from models.peers import Client, Peer
@@ -59,7 +59,11 @@ def send_to_single(packet: Packet, peer_id: str):
                                 lambda m, e: print(f"Error in module {m.__class__.__name__} on receive:\n{e}"))
 
 
-def message_received(message: Packet, peer: Peer):
+def message_received(message: Packet, peer: Client):
+    if not message.data:
+        message.data = Data()
+
+    message.data.content["from_peer"] = peer.peer_id
     if is_relay:
         if len(list(peers.keys())) > 1:
             dest_peer_id = list(peers.keys())[0] if list(peers.keys())[0] is not peer.peer_id else list(peers.keys())[1]
@@ -115,7 +119,7 @@ def connected_callback(peer_id):
         )
 
 
-def incoming_message_listener(connection, peer: Peer):
+def incoming_message_listener(connection, peer: Client):
     next_data_len = 8
     while peer.peer_id in peers.keys():
         if peers[peer.peer_id]["muted"]:
@@ -166,6 +170,11 @@ def incoming_message_listener(connection, peer: Peer):
                 connected_callback(peer.peer_id)
                 peers[peer.peer_id]["wrote"] = True
                 continue
+            elif packet.action.action == PeerInfoAction().action:
+                peer_port = packet.data.content["port"]
+                peer_nickname = packet.data.content["nickname"]
+                peers[peer.peer_id]["peer"].nickname = peer_nickname
+                peers[peer.peer_id]["peer"].port = peer_port
             else:
                 if not peers[peer.peer_id]["wrote"]:
                     send_to_single(
